@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>한글 따라쓰기</title>
+<style>
+  body { font-family: 'Arial', sans-serif; padding: 20px; background: #f0f8ff; }
+  h1 { text-align: center; }
+  #container { display: flex; justify-content: center; gap: 40px; margin-top: 20px; }
+  .canvas-wrapper {
+    position: relative;
+    width: 400px;
+    height: 340px;
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: white;
+  }
+  /* 가이드 글자 (회색) */
+  #guideCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 400px;
+    height: 340px;
+    z-index: 0;
+  }
+  /* 그 위에 따라쓰는 캔버스 */
+  #drawGuideCanvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 400px;
+    height: 340px;
+    z-index: 1;
+    touch-action: none;
+    user-select: none;
+    cursor: crosshair;
+  }
+
+  /* 오른쪽 혼자 쓰기 캔버스 */
+  #drawCanvas {
+    border: 2px solid #333;
+    border-radius: 8px;
+    background: white;
+    width: 400px;
+    height: 340px;
+    touch-action: none;
+    user-select: none;
+    cursor: crosshair;
+  }
+
+  .controls { text-align: center; margin-top: 20px; }
+  button, select { font-size: 16px; margin: 0 5px; padding: 6px 12px; }
+  label { margin-right: 10px; }
+  .section { text-align: center; }
+  .section h3 { font-size: 22px; margin-bottom: 10px; }
+  #singleReadBtnWrapper { margin-top: 30px; text-align: center; }
+  #singleReadBtn {
+    font-size: 18px;
+    padding: 10px 24px;
+    cursor: pointer;
+    border-radius: 6px;
+    border: none;
+    background-color: #007acc;
+    color: white;
+  }
+  #singleReadBtn:hover { background-color: #005fa3; }
+  /* 팝업 메시지 */
+  #popupMsg {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: rgba(50, 50, 50, 0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 16px;
+    z-index: 9999;
+    user-select: none;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<!-- 팝업 메시지 -->
+<div id="popupMsg">동두천시 장애인종합복지관 IT교실에서 함께 즐겨보아요~!!^^</div>
+
+<h1>한글 따라쓰기</h1>
+
+<div class="controls">
+  <label for="colorPicker">펜 색상:</label>
+  <select id="colorPicker">
+    <option value="black" selected>검정</option>
+    <option value="red">빨강</option>
+    <option value="blue">파랑</option>
+    <option value="green">초록</option>
+    <option value="purple">보라</option>
+    <option value="orange">주황</option>
+  </select>
+
+  <button id="eraserBtn">지우개 켜기</button>
+  <button id="clearBtn">초기화</button>
+  <button id="newCharBtn">새 글자</button>
+</div>
+
+<div id="container">
+  <div class="section">
+    <h3>한글 따라쓰기</h3>
+    <div class="canvas-wrapper">
+      <!-- 회색 글자 가이드 -->
+      <canvas id="guideCanvas" width="400" height="340"></canvas>
+      <!-- 따라쓰는 캔버스 -->
+      <canvas id="drawGuideCanvas" width="400" height="340"></canvas>
+    </div>
+  </div>
+  <div class="section">
+    <h3>혼자 써보기</h3>
+    <canvas id="drawCanvas" width="400" height="340"></canvas>
+  </div>
+</div>
+
+<div id="singleReadBtnWrapper">
+  <button id="singleReadBtn">완료 - 음성 듣기</button>
+</div>
+
+<script>
+  const chars = ['가','나','다','라','마','바','사','아','자','차','카','타','파','하'];
+  let currentChar = '';
+
+  const guideCanvas = document.getElementById('guideCanvas');
+  const guideCtx = guideCanvas.getContext('2d');
+
+  const drawGuideCanvas = document.getElementById('drawGuideCanvas');
+  const drawGuideCtx = drawGuideCanvas.getContext('2d');
+
+  const drawCanvas = document.getElementById('drawCanvas');
+  const drawCtx = drawCanvas.getContext('2d');
+
+  const colorPicker = document.getElementById('colorPicker');
+  const eraserBtn = document.getElementById('eraserBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const newCharBtn = document.getElementById('newCharBtn');
+  const singleReadBtn = document.getElementById('singleReadBtn');
+
+  let eraserMode = false;
+
+  // mp3 파일 경로
+  const audioMap = {
+    '가': 'ga.mp3',
+    '나': 'na.mp3',
+    '다': 'da.mp3',
+    '라': 'ra.mp3',
+    '마': 'ma.mp3',
+    '바': 'ba.mp3',
+    '사': 'sa.mp3',
+    '아': 'a.mp3',
+    '자': 'ja.mp3',
+    '차': 'cha.mp3',
+    '카': 'ka.mp3',
+    '타': 'ta.mp3',
+    '파': 'pa.mp3',
+    '하': 'ha.mp3'
+  };
+
+  function speakChar(char) {
+    const audioSrc = audioMap[char];
+    if (!audioSrc) return;
+
+    const audio = new Audio(audioSrc);
+    audio.play().catch((e) => {
+      alert('음성 재생에 문제가 있습니다. mp3 파일 위치와 이름을 확인하세요.');
+      console.error(e);
+    });
+  }
+
+  // --- 그리기 이벤트 (drawGuideCanvas 위에 그림) ---
+
+  let drawing = false;
+  let lastX = 0, lastY = 0;
+
+  function getPos(e, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches) {
+      return {
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top
+      };
+    } else {
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    }
+  }
+
+  function startDrawing(e) {
+    e.preventDefault();
+    drawing = true;
+    const pos = getPos(e, drawGuideCanvas);
+    lastX = pos.x;
+    lastY = pos.y;
+  }
+  function draw(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    const pos = getPos(e, drawGuideCanvas);
+    drawGuideCtx.lineCap = 'round';
+    drawGuideCtx.lineJoin = 'round';
+    drawGuideCtx.lineWidth = eraserMode ? 20 : 5;
+    drawGuideCtx.strokeStyle = eraserMode ? 'white' : colorPicker.value;
+    drawGuideCtx.beginPath();
+    drawGuideCtx.moveTo(lastX, lastY);
+    drawGuideCtx.lineTo(pos.x, pos.y);
+    drawGuideCtx.stroke();
+    lastX = pos.x;
+    lastY = pos.y;
+  }
+  function stopDrawing(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    drawing = false;
+  }
+
+  drawGuideCanvas.addEventListener('mousedown', startDrawing);
+  drawGuideCanvas.addEventListener('touchstart', startDrawing);
+
+  drawGuideCanvas.addEventListener('mousemove', draw);
+  drawGuideCanvas.addEventListener('touchmove', draw);
+
+  drawGuideCanvas.addEventListener('mouseup', stopDrawing);
+  drawGuideCanvas.addEventListener('touchend', stopDrawing);
+  drawGuideCanvas.addEventListener('touchcancel', stopDrawing);
+
+  // 오른쪽 캔버스 그리기 이벤트 (독립적으로 그림)
+  let drawingRight = false;
+  let lastXRight = 0, lastYRight = 0;
+
+  function startDrawingRight(e) {
+    e.preventDefault();
+    drawingRight = true;
+    const pos = getPos(e, drawCanvas);
+    lastXRight = pos.x;
+    lastYRight = pos.y;
+  }
+  function drawRight(e) {
+    if (!drawingRight) return;
+    e.preventDefault();
+    const pos = getPos(e, drawCanvas);
+    drawCtx.lineCap = 'round';
+    drawCtx.lineJoin = 'round';
+    drawCtx.lineWidth = eraserMode ? 20 : 5;
+    drawCtx.strokeStyle = eraserMode ? 'white' : colorPicker.value;
+    drawCtx.beginPath();
+    drawCtx.moveTo(lastXRight, lastYRight);
+    drawCtx.lineTo(pos.x, pos.y);
+    drawCtx.stroke();
+    lastXRight = pos.x;
+    lastYRight = pos.y;
+  }
+  function stopDrawingRight(e) {
+    if (!drawingRight) return;
+    e.preventDefault();
+    drawingRight = false;
+  }
+
+  drawCanvas.addEventListener('mousedown', startDrawingRight);
+  drawCanvas.addEventListener('touchstart', startDrawingRight);
+
+  drawCanvas.addEventListener('mousemove', drawRight);
+  drawCanvas.addEventListener('touchmove', drawRight);
+
+  drawCanvas.addEventListener('mouseup', stopDrawingRight);
+  drawCanvas.addEventListener('touchend', stopDrawingRight);
+  drawCanvas.addEventListener('touchcancel', stopDrawingRight);
+
+  // 회색 글자 가이드 그리기
+  function drawGuideChar() {
+    guideCtx.clearRect(0, 0, guideCanvas.width, guideCanvas.height);
+    guideCtx.font = 'bold 200px Malgun Gothic, Arial, sans-serif';
+    guideCtx.fillStyle = 'rgba(128,128,128,0.3)'; // 반투명 회색
+    guideCtx.textAlign = 'center';
+    guideCtx.textBaseline = 'middle';
+    guideCtx.fillText(currentChar, guideCanvas.width / 2, guideCanvas.height / 2);
+  }
+
+  // 따라쓰기 캔버스 초기화
+  function clearDrawGuideCanvas() {
+    drawGuideCtx.clearRect(0, 0, drawGuideCanvas.width, drawGuideCanvas.height);
+  }
+  // 오른쪽 캔버스 초기화
+  function clearDrawCanvas() {
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  }
+
+  clearBtn.addEventListener('click', () => {
+    clearDrawGuideCanvas();
+    clearDrawCanvas();
+  });
+
+  // 새 글자 설정
+  function setRandomChar() {
+    currentChar = chars[Math.floor(Math.random() * chars.length)];
+    drawGuideChar();
+    clearDrawGuideCanvas();
+    clearDrawCanvas();
+  }
+
+  newCharBtn.addEventListener('click', setRandomChar);
+
+  eraserBtn.addEventListener('click', () => {
+    eraserMode = !eraserMode;
+    eraserBtn.textContent = eraserMode ? '지우개 끄기' : '지우개 켜기';
+  });
+
+  singleReadBtn.addEventListener('click', () => {
+    speakChar(currentChar);
+  });
+
+  // 최초 글자 세팅
+  setRandomChar();
+</script>
+
+</body>
+</html>
